@@ -1,0 +1,79 @@
+# =============================================================================
+# SkinAge v2.0.0 — Railway Streamlit deployment
+# =============================================================================
+# Railway will provide the PORT environment variable automatically.
+# The SkinAge dashboard downloads its model/assets at runtime if they are absent.
+# =============================================================================
+
+FROM python:3.11-slim AS builder
+
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# Build/runtime libraries needed by OpenCV, MediaPipe, scipy, etc.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libgl1 \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+# Install CPU-only PyTorch first so Railway does not pull CUDA packages.
+RUN python -m pip install --upgrade pip && \
+    pip install \
+      torch torchvision \
+      --index-url https://download.pytorch.org/whl/cpu
+
+# Install SkinAge dependencies.
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+
+
+# -----------------------------------------------------------------------------
+# Runtime image
+# -----------------------------------------------------------------------------
+FROM python:3.11-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    STREAMLIT_SERVER_HEADLESS=true \
+    STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy installed Python packages/executables from builder.
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+WORKDIR /app
+
+# Copy the complete SkinAge application.
+COPY . .
+
+# Ensure runtime-download destinations exist.
+RUN mkdir -p /app/outputs \
+             /app/models/mediapipe
+
+# Railway provides PORT dynamically.
+# 8501 is only the conventional Streamlit port and is informational here.
+EXPOSE 8501
+
+# Railway/Streamlit-compatible health check.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -fsS "http://localhost:${PORT:-8501}/_stcore/health" || exit 1
+
+# Use a shell so ${PORT} is expanded at runtime.
+CMD ["sh", "-c", "exec streamlit run src/dashboard/app.py --server.address=0.0.0.0 --server.port=${PORT:-8501} --server.headless=true"]
