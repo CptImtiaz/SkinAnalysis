@@ -22,7 +22,9 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 _MODEL_PATH = _PROJECT_ROOT / "outputs" / "best_model.pth"
 
-_RELEASE_BASE = "https://github.com/Ennsss/SkinAge/releases/download/v2.0.0"
+_RELEASE_BASE = (
+    "https://github.com/CptImtiaz/SkinAnalysis/releases/download/skinv2.0"
+)
 
 _REQUIRED_FILES = [
     (
